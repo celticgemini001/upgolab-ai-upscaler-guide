@@ -68,7 +68,7 @@ and gives you a big one that looks like it was shot that way. Some tools deliver
 close on some inputs. The failure mode is not that they fail — it is that they fail in a
 way that scores well on the numbers vendors publish.</p>
 
-<p>I measured this instead of arguing about it. Two experiments, both reproducible with
+<p>I measured this instead of arguing about it. Three experiments, all reproducible with
 commands at the end of the page.</p>
 
 <h2>The two things "upscaling" can mean</h2>
@@ -181,6 +181,109 @@ encodes at the same bitrate but different resolutions are not comparable. At equ
 bits-per-pixel, encoding <em>after</em> the upscale beat encoding before it by 0.6–1.4 dB
 in my runs — because the encoder gets to spend its budget on the final pixel grid rather
 than being upscaled afterwards.</p>
+
+<h2>Experiment 3: "upscale in small 2× steps" — measured, and it does not pay</h2>
+
+<p>The piece of folklore I hear most often is that you should never upscale in one big jump.
+Do 2×, then 2× again, and the result beats a single 4× pass, because "each step has less
+work to do." It sounds plausible: a 4× kernel has to invent 15 pixels for every one it
+reads, while a 2× kernel invents 3. Less invention per step, so less error per step.</p>
+
+<p>The catch is that the errors do not stay put. Each pass low-passes the output of the
+pass before it, so the chained pipeline filters the image twice. Whether that nets out
+positive is an empirical question, so I ran it on two sources with different statistics: a
+Mandelbrot render (smooth gradients plus one-pixel filaments that a low-pass kills
+immediately) and a synthetic resolution chart (Siemens star, ring pattern, 1-px
+checkerboard, hard luminance ramp). Both 512×512, downscaled to 128×128 with an area
+filter, then brought back to 512 by four different pipelines.</p>
+
+<table>
+<thead><tr><th>Source</th><th>Pipeline (128 → 512)</th><th class="num">PSNR (dB)</th><th class="num">HF retained</th><th class="num">Mean gradient</th></tr></thead>
+<tbody>
+<tr><td rowspan="4">Mandelbrot</td><td>4× Lanczos, one step</td><td class="num">29.02</td><td class="num">8.57%</td><td class="num">1.32</td></tr>
+<tr><td>2× Lanczos → 2× Lanczos</td><td class="num">29.03</td><td class="num">9.08%</td><td class="num">1.33</td></tr>
+<tr><td>2× bicubic → 2× Lanczos</td><td class="num">28.97</td><td class="num"><strong>10.06%</strong></td><td class="num">1.28</td></tr>
+<tr><td>2× neighbour → 2× Lanczos</td><td class="num">28.58</td><td class="num">25.72%</td><td class="num">1.54</td></tr>
+<tr><td rowspan="4">Resolution chart</td><td>4× Lanczos, one step</td><td class="num">14.67</td><td class="num"><strong>11.39%</strong></td><td class="num">13.38</td></tr>
+<tr><td>2× Lanczos → 2× Lanczos</td><td class="num">14.71</td><td class="num">9.71%</td><td class="num">13.41</td></tr>
+<tr><td>2× bicubic → 2× Lanczos</td><td class="num">14.27</td><td class="num">8.21%</td><td class="num">12.71</td></tr>
+<tr><td>2× neighbour → 2× Lanczos</td><td class="num">13.14</td><td class="num">33.66%</td><td class="num">14.07</td></tr>
+</tbody>
+</table>
+
+<p>Read the PSNR column first, because it is the least ambiguous result on this page:
+<strong>all four pipelines land within 0.06 dB of each other</strong> except the
+nearest-neighbour one. Two Lanczos passes versus one Lanczos pass: +0.01 dB on Mandelbrot,
++0.04 dB on the chart. That is noise, not a technique. If you were choosing a pipeline on
+PSNR you would have no reason to prefer either, and if you were told the chained version
+was meaningfully better, the difference is smaller than the difference between two
+downscale filters (area, bicubic and Lanczos downscales of the same source disagreed by
+under 0.2 dB).</p>
+
+<p>The high-frequency column is where the folklore gets interesting, because here the two
+sources disagree about the <em>direction</em> of the effect. On the Mandelbrot, the chained
+bicubic→Lanczos pipeline retains 10.06% of the source's high-frequency energy against
+8.57% for the single step — a 17% relative improvement. On the resolution chart, the same
+pipeline retains 8.21% against the single step's 11.39% — a 28% relative regression. Same
+code, same kernels, opposite verdict, purely because the two images put their detail at
+different spatial frequencies.</p>
+
+<div class="callout">
+<p><strong>The honest reading.</strong> Chained 2× upscaling is not a technique that helps
+or hurts; it is a coin flip whose bias depends on the image. If a vendor's documentation
+recommends it as a general rule, they are either describing a specific content type without
+saying so, or repeating something that was measured once on one image and never again.</p>
+</div>
+
+<p>The nearest-neighbour row is the interesting exception, and it is a trap. Chaining a 2×
+nearest pass before a Lanczos pass keeps 25–34% of the high-frequency energy, four to
+twenty times the Lanczos numbers. That energy is pixel-replication edges, not scene detail —
+which is exactly the same illusion described in Experiment 1, arrived at from the other
+direction. It also scores <em>worse</em> on PSNR than every other pipeline while showing the
+highest mean gradient. Three metrics, and the one that looks best is the one that is
+measuring the artifact.</p>
+
+<p>When the effect is measured at larger factors it stays flat. At 8× (64 → 512), a three-step
+chain versus a single pass: PSNR 27.343 vs 27.342 on Mandelbrot, 9.309 vs 9.311 on the
+chart. The high-frequency retention moves a little — 12.10% → 12.68% on Mandelbrot, 4.62%
+→ 5.99% on the chart — but both numbers are so far below the 65% that the ground truth
+carries that the difference is academic. At 2× there is nothing to chain at all, so the
+advice is untestable.</p>
+
+<h3>What the chaining costs in wall clock</h3>
+
+<p>Upscaling a 512×512 Mandelbrot to 4096×4096, best of three runs, ffmpeg 7.x on CPU:
+a single 8× Lanczos pass took <strong>0.637 s</strong>; three chained 2× passes
+(512→1024→2048→4096) took <strong>1.060 s</strong>. The chained version is 1.67× slower.</p>
+
+<p>That is worth sitting with, because the chained pipeline actually does <em>less</em>
+arithmetic. A single 8× pass touches 4096² output pixels in one separable filter. The chain
+touches 1024², then 2048², then 4096² — 0.76× the pixel work. It still runs 67% longer,
+because each step pays to write an intermediate image and read it back, and because three
+kernel launches do not pipeline as well as one. So the advice is strictly negative on
+compute, neutral on PSNR, and content-dependent on detail retention.</p>
+
+<pre><code># the chained-vs-single comparison, end to end
+ffmpeg -i gt.png -vf "scale=128:128:flags=area" low.png
+
+# A: one step
+ffmpeg -i low.png -vf "scale=512:512:flags=lanczos" a.png
+
+# B: two steps
+ffmpeg -i low.png -vf "scale=256:256:flags=lanczos" b1.png
+ffmpeg -i b1.png  -vf "scale=512:512:flags=lanczos" b2.png
+
+# compare both against ground truth
+ffmpeg -i a.png  -i gt.png -lavfi "[0:v][1:v]psnr" -f null -
+ffmpeg -i b2.png -i gt.png -lavfi "[0:v][1:v]psnr" -f null -
+</code></pre>
+
+<p>One caveat on scope, stated plainly: this measure covers resampling kernels of the same
+family. A genuinely different operator in the middle of the chain — a denoiser, a sharpener,
+a learned model — is not the same experiment and can legitimately change the answer. The
+claim being refuted here is the narrow one, that splitting a 4× rescale into two 2×
+rescales is inherently better. It is not. Pick a single pass, pick the cheapest one, and
+spend the saved time on getting a better source frame.</p>
 
 <h2>What this means when you pick a tool</h2>
 
