@@ -211,14 +211,13 @@ filter, then brought back to 512 by four different pipelines.</p>
 </tbody>
 </table>
 
-<p>Read the PSNR column first, because it is the least ambiguous result on this page:
-<strong>all four pipelines land within 0.06 dB of each other</strong> except the
-nearest-neighbour one. Two Lanczos passes versus one Lanczos pass: +0.01 dB on Mandelbrot,
-+0.04 dB on the chart. That is noise, not a technique. If you were choosing a pipeline on
-PSNR you would have no reason to prefer either, and if you were told the chained version
-was meaningfully better, the difference is smaller than the difference between two
-downscale filters (area, bicubic and Lanczos downscales of the same source disagreed by
-under 0.2 dB).</p>
+<p>Read the PSNR column first, because it is the least ambiguous result on this page. One
+Lanczos 4× pass versus two Lanczos 2× passes: +0.01 dB on Mandelbrot, +0.04 dB on the chart.
+Both differences are inside the run-to-run spread of the metric, so the split buys nothing.
+The bicubic-first chain is the only pipeline that moves the needle, and it moves it the wrong
+way — 0.05 dB below the single pass on Mandelbrot, 0.40 dB below on the chart. If you were
+choosing a pipeline on PSNR, you would pick the single pass, and the margin by which the
+folklore loses is larger than the margin by which any variant wins.</p>
 
 <p>The high-frequency column is where the folklore gets interesting, because here the two
 sources disagree about the <em>direction</em> of the effect. On the Mandelbrot, the chained
@@ -256,12 +255,12 @@ advice is untestable.</p>
 a single 8× Lanczos pass took <strong>0.637 s</strong>; three chained 2× passes
 (512→1024→2048→4096) took <strong>1.060 s</strong>. The chained version is 1.67× slower.</p>
 
-<p>That is worth sitting with, because the chained pipeline actually does <em>less</em>
-arithmetic. A single 8× pass touches 4096² output pixels in one separable filter. The chain
-touches 1024², then 2048², then 4096² — 0.76× the pixel work. It still runs 67% longer,
-because each step pays to write an intermediate image and read it back, and because three
-kernel launches do not pipeline as well as one. So the advice is strictly negative on
-compute, neutral on PSNR, and content-dependent on detail retention.</p>
+<p>That is worth sitting with, because the chained pipeline actually does <em>more</em>
+arithmetic, not less. A single 8× pass touches 4096² output pixels in one separable filter.
+The chain touches 1024², then 2048², then 4096² — 1.31× the pixel work, since 0.375 of it is
+spent producing intermediates that get thrown away. The extra 0.67× of wall clock on top of
+that comes from reading and re-writing intermediates. So the advice costs compute, buys
+nothing on PSNR, and moves detail retention in a direction that depends on the image.</p>
 
 <pre><code># the chained-vs-single comparison, end to end
 ffmpeg -i gt.png -vf "scale=128:128:flags=area" low.png
