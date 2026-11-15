@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>AI Upscaling Explained: What It Recovers and What It Invents</title>
-<meta name="description" content="Measured: the interpolation methods with the best PSNR destroy 98% of fine detail. What that means for choosing an upscaler, and how to tell recovery from invention.">
+<meta name="description" content="Measured band by band: a single-frame upscale recovers 4.3% of the detail its source lost, and sharpening raises the amplitude 9x without moving that number at all. How to tell recovery from invention, with reproducible code.">
 <link rel="canonical" href="https://celticgemini001.github.io/upgolab-ai-upscaler-guide/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="AI Upscaling Explained: What It Recovers and What It Invents">
@@ -61,7 +61,7 @@ footer{margin-top:4rem;padding-top:1.4rem;border-top:1px solid var(--line);
 <p class="lede">The interpolation method with the highest measured fidelity destroys 98% of the
 fine detail in an image. That sentence sounds like a paradox until you look at what the
 metric is actually rewarding.</p>
-<p class="meta">Updated 14 November 2026 · measured on real images with ffmpeg and numpy</p>
+<p class="meta">Updated 15 November 2026 · measured with ffmpeg and numpy, scripts below</p>
 
 <p>Every upscaling tool in the market is sold on the same promise: it takes a small image
 and gives you a big one that looks like it was shot that way. Some tools deliver something
@@ -284,6 +284,304 @@ claim being refuted here is the narrow one, that splitting a 4× rescale into tw
 rescales is inherently better. It is not. Pick a single pass, pick the cheapest one, and
 spend the saved time on getting a better source frame.</p>
 
+<h2>Experiment 4: of the detail an upscaler adds, how much was in the picture?</h2>
+
+<p>Everything above measured <em>how much</em> high-frequency energy a method produces. None of
+it asked <em>whose</em> energy it is. That is the hole this section fills, and it is the reason
+the earlier numbers look paradoxical: Lanczos scoring highest on PSNR while retaining 1.3% of
+the detail is only a contradiction if you assume the retained energy and the true detail are
+the same thing. They are not, and the gap between them is measurable.</p>
+
+<p>The method is a band-by-band audit against a known answer. I built a 1024×1024 scene —
+a gradient, one hard-edged rectangle, and two stripe fields — and band-limited the whole thing
+to 0.45 cycles/pixel. The band limit is not decoration: it is the premise. A scene with no
+energy above 0.45 can be sampled on a 512×512 grid without aliasing, so "everything above
+0.25 cycles/pixel" is exactly and only what a single 512 frame failed to capture. Nothing else
+is lost, and nothing in that band is an artefact of the sampling itself.</p>
+
+<p>Then I modelled a capture: the scene through a Gaussian point-spread function
+(σ = 0.6 scene pixels), decimated 2× at four sub-pixel phases — (0,0), (1,0), (0,1), (1,1).
+One phase is a 512×512 frame. Four phases together tile the 1024 grid exactly, which the code
+verifies rather than assumes: the reassembled mosaic differs from the blurred scene by
+<code>0.0e+00</code>.</p>
+
+<p>For each candidate reconstruction I bandpass both it and the truth into four radial bands and
+report two numbers per band. <strong>corr</strong> is the normalised correlation with the truth
+inside that band: 1.0 means every cycle in that band was recovered, 0.0 means whatever energy
+sits there is unrelated to the scene. <strong>rms</strong> is the amplitude in the band, so you
+can see a method inflating a band while its correlation stays flat.</p>
+
+<table>
+<thead>
+<tr><th>Reconstruction</th><th>0–0.125<br>corr / rms</th><th>0.125–0.25<br>corr / rms</th>
+<th>0.25–0.375<br>corr / rms</th><th>0.375–0.5<br>corr / rms</th><th>PSNR</th>
+<th>real share<br>above 0.25</th></tr>
+</thead>
+<tbody>
+<tr><td>1 frame, Lanczos3</td><td>0.996 / 0.139</td><td>0.769 / 0.068</td><td>0.209 / 0.029</td><td>−0.046 / 0.004</td><td>21.77</td><td>4.27%</td></tr>
+<tr><td>+ unsharp 1.0</td><td>0.990 / 0.143</td><td>0.771 / 0.133</td><td>0.208 / 0.058</td><td>−0.046 / 0.008</td><td>20.81</td><td>4.27%</td></tr>
+<tr><td>+ unsharp 3.0</td><td>0.956 / 0.154</td><td>0.771 / 0.261</td><td>0.208 / 0.115</td><td>−0.046 / 0.016</td><td>16.55</td><td>4.27%</td></tr>
+<tr><td>+ unsharp 8.0</td><td>0.819 / 0.199</td><td>0.771 / 0.583</td><td>0.208 / 0.259</td><td>−0.046 / 0.035</td><td>9.27</td><td>4.27%</td></tr>
+<tr><td>4 phases, mosaic only</td><td>1.000 / 0.138</td><td>0.999 / 0.077</td><td>0.987 / 0.031</td><td>0.998 / 0.031</td><td>26.12</td><td>98.51%</td></tr>
+<tr><td>4 phases + RL 20 iters</td><td>1.000 / 0.139</td><td>1.000 / 0.102</td><td>1.000 / 0.062</td><td>0.998 / 0.092</td><td>40.73</td><td>99.78%</td></tr>
+<tr><td>4 phases + RL 100 iters</td><td>1.000 / 0.139</td><td>1.000 / 0.102</td><td>1.000 / 0.062</td><td>1.000 / 0.105</td><td>49.51</td><td>99.99%</td></tr>
+<tr><td>truth (target)</td><td>1.000 / 0.139</td><td>1.000 / 0.102</td><td>1.000 / 0.062</td><td>1.000 / 0.105</td><td>—</td><td>100%</td></tr>
+</tbody>
+</table>
+
+<p>Three things in that table are worth stating in plain terms.</p>
+
+<p><strong>One: a single frame recovers 4.27% of what it lost.</strong> Below 0.25 cycles/pixel
+the upscale is honest — 0.996 correlation, essentially perfect. One band up, at 0.25–0.375,
+correlation collapses to 0.209. Energy-weighting the two upper bands gives a faithful share of
+4.27%, which means 95.7% of everything above the source Nyquist is fabrication. The 33.61% of the
+scene's total energy that lives above 0.25 cycles/pixel is almost entirely gone, and what replaced
+it looks like detail without being any.</p>
+
+<p><strong>Two: sharpening is a volume knob on a channel with no signal.</strong> Sweeping the
+unsharp amount from 0 to 8 moves the upper-band correlation by 0.0001 — from 0.2085 to 0.2084 —
+while the amplitude in that band rises 8.99×. The amplitude gain is 1 + amount to within 0.2%,
+which is not a coincidence and not a property of images. A Gaussian of σ = 2 output
+pixels has an OTF of about 0.0008 at 0.3 cycles/pixel, so the unsharp mask is passing the band
+essentially unattenuated and adding it back at full weight. The measurement is reporting the
+kernel's own algebra. That is the point: there is no image information in the gain.</p>
+
+<table>
+<thead>
+<tr><th>unsharp amount</th><th>0.25–0.375 rms</th><th>gain vs none</th>
+<th>corr 0.25–0.375</th><th>corr 0.125–0.25</th><th>corr 0–0.125</th><th>PSNR</th></tr>
+</thead>
+<tbody>
+<tr><td>0.0</td><td>0.0289</td><td>1.000</td><td>0.2085</td><td>0.7690</td><td>0.9964</td><td>21.77</td></tr>
+<tr><td>0.5</td><td>0.0433</td><td>1.499</td><td>0.2085</td><td>0.7701</td><td>0.9945</td><td>21.52</td></tr>
+<tr><td>1.0</td><td>0.0577</td><td>1.998</td><td>0.2084</td><td>0.7706</td><td>0.9903</td><td>20.81</td></tr>
+<tr><td>2.0</td><td>0.0865</td><td>2.996</td><td>0.2084</td><td>0.7710</td><td>0.9761</td><td>18.71</td></tr>
+<tr><td>4.0</td><td>0.1441</td><td>4.993</td><td>0.2084</td><td>0.7713</td><td>0.9312</td><td>14.64</td></tr>
+<tr><td>8.0</td><td>0.2593</td><td>8.986</td><td>0.2084</td><td>0.7714</td><td>0.8194</td><td>9.27</td></tr>
+</tbody>
+</table>
+
+<p><strong>Three: the best amount of sharpening on this scene was zero.</strong> PSNR falls
+monotonically from 21.77 dB at amount 0 to 9.27 dB at amount 8, and correlation in the
+lowest band — the band that was actually recovered — degrades from 0.996 to 0.819. Sharpening
+does not add a single real cycle anywhere; it spends fidelity in the bands you had in order to
+inflate a band you never had. On real photographic output the low-band cost is smaller and the
+perceived improvement is real, because perception responds to edge contrast and not to
+correlation with an unavailable original. But the accounting is the accounting.</p>
+
+<h3>What it takes to get the upper band back</h3>
+
+<p>Four sub-pixel phases and no interpolation at all — just writing each sample into its true
+position on the 1024 grid — takes correlation at 0.25–0.375 from 0.209 to 0.987, and the
+faithful share of the lost band from 4.27% to 98.51%, with PSNR up 4.35 dB over the single
+frame. That is the same information the four captures held all along, placed correctly.</p>
+
+<p>The interesting part is how few phases you need, and how badly phase <em>choice</em> matters.
+Two frames on the diagonal give 0.709; two frames on one axis give 0.362. Both are two frames.
+Both cost the same acquisition time. The diagonal pair doubles the sampling density in each
+direction; the horizontal pair only doubles it in one, and the upper band is a radial measure, so
+half of it stays empty. If you can only take two, take them diagonally.</p>
+
+<table>
+<thead>
+<tr><th>Frames</th><th>Phases</th><th>PSNR</th><th>corr 0.25–0.375</th><th>corr 0.375–0.5</th></tr>
+</thead>
+<tbody>
+<tr><td>1</td><td>(0,0)</td><td>21.77</td><td>0.209</td><td>−0.046</td></tr>
+<tr><td>2</td><td>(0,0) + (1,1) diagonal</td><td>20.56</td><td>0.709</td><td>0.696</td></tr>
+<tr><td>2</td><td>(0,0) + (1,0) same axis</td><td>20.56</td><td>0.362</td><td>0.242</td></tr>
+<tr><td>4</td><td>all four</td><td>26.12</td><td>0.987</td><td>0.998</td></tr>
+</tbody>
+</table>
+
+<p>Note that the two-frame rows have <em>lower</em> PSNR than the single frame while having far
+higher correlation in the upper bands. PSNR is dominated by the bands that carry most of the
+energy, and in a two-frame interleave half the output pixels are real samples while the other
+half are interpolated guesswork that lands on a coarser grid than a plain upscale would. The
+metric that matters for "did I recover detail" and the metric that matters for "is this pixel
+close to the truth" rank these four rows in different orders. Pick the metric before you pick
+the method.</p>
+
+<h3>The precision this needs, and the PSF you have to guess</h3>
+
+<p>Sub-pixel alignment is the obvious objection, so I measured its cost. Introducing an error of
+ε scene pixels on each successive phase — so phase three is off by 3ε — degrades the upper band
+gracefully at first and then not at all gracefully:</p>
+
+<table>
+<thead>
+<tr><th>ε (scene px)</th><th>PSNR</th><th>corr 0.25–0.375</th><th>corr 0.375–0.5</th></tr>
+</thead>
+<tbody>
+<tr><td>0.00</td><td>26.12</td><td>0.987</td><td>0.998</td></tr>
+<tr><td>0.05</td><td>25.33</td><td>0.939</td><td>0.896</td></tr>
+<tr><td>0.10</td><td>23.52</td><td>0.809</td><td>0.688</td></tr>
+<tr><td>0.25</td><td>18.30</td><td>0.363</td><td>0.289</td></tr>
+<tr><td>0.50</td><td>16.71</td><td>0.100</td><td>0.163</td></tr>
+<tr><td>1.00</td><td>16.21</td><td>0.075</td><td>−0.001</td></tr>
+</tbody>
+</table>
+
+<p>A tenth of a pixel still leaves 0.809. A quarter of a pixel — which is a rounding error in
+most hand-held workflows — drops it to 0.363, below the two-frame diagonal case at far higher
+cost. The whole gain is available inside ±0.1 px and gone by ±0.5 px. This is why the technique
+lives in microscopy, astronomy and satellite imaging, where the platform is bolted down, and not
+in phone photography.</p>
+
+<p>Deconvolution has a different failure mode: it needs the PSF, and the PSF is a guess. Feeding
+Richardson–Lucy the right σ (0.6) at 20 iterations reaches 40.73 dB. Guessing 0.4 or 0.8 — a 33%
+error in either direction — costs about 9 to 11 dB. Guessing 1.0 costs 16 dB. Notably, an
+underestimated σ is the safer direction and an overestimated one is not: at σ = 1.0 the upper
+band still correlates 0.954 and 0.883, which looks fine, while PSNR has collapsed to 24.95. A
+too-soft kernel asks the solver to invent smaller features than exist, and it obliges. The
+correlation in the top band is where that shows up first.</p>
+
+<table>
+<thead>
+<tr><th>Assumed σ (truth 0.6)</th><th>PSNR</th><th>corr 0.25–0.375</th><th>corr 0.375–0.5</th></tr>
+</thead>
+<tbody>
+<tr><td>0.2</td><td>26.71</td><td>0.990</td><td>0.998</td></tr>
+<tr><td>0.4</td><td>29.42</td><td>0.996</td><td>0.999</td></tr>
+<tr><td>0.6 (correct)</td><td>40.73</td><td>1.000</td><td>0.998</td></tr>
+<tr><td>0.8</td><td>31.27</td><td>0.996</td><td>0.979</td></tr>
+<tr><td>1.0</td><td>24.95</td><td>0.954</td><td>0.883</td></tr>
+</tbody>
+</table>
+
+<h3>A check you can run without knowing the truth</h3>
+
+<p>All of the above needs a ground truth, which you do not have for a photograph. So: is there a
+test that separates recovered detail from invented detail using only the image itself? One
+candidate works and one does not, and the one that fails is the one people reach for.</p>
+
+<p><strong>What works: the round trip.</strong> Upscale, then downscale back to the source grid,
+and measure the residual against the frame you started from. Invented detail cannot survive that
+round trip coherently, because it does not correspond to anything the downsampler can find.
+Measured on the same single frame: residual 0.0018 with no sharpening, 0.0731 at amount 1.0,
+0.2159 at 3.0, 0.5728 at 8.0. That is a 314× spread that tracks the amount of fabrication and
+requires no reference at all. If a tool's output does not survive being scaled back to its input
+size, the detail it added was never in the input.</p>
+
+<p><strong>What does not work: asking two upscalers to agree.</strong> The intuition is that
+independent methods converging on the same fine structure is evidence the structure is real.
+Measured: Lanczos and a B-spline cubic agree with each other at 1.000, 1.000, 0.982 and 0.929
+across the four bands, while their correlation with the truth in those same bands is 0.996,
+0.769, 0.209 and −0.046. In the top band they agree with each other 0.929 while being
+<em>anti</em>-correlated with the scene. They are not discovering the same hidden detail; they are
+computing the same deterministic function of the same insufficient samples, and the resulting
+ringing pattern is reproducible. Reproducibility is not truth.</p>
+
+<div class="callout">
+<p><strong>The practical consequence.</strong> An interpolation upscaler cannot add a band it was
+never given — that is information theory, not opinion — and this audit puts a number on it:
+4.27% of the lost band is real, and no amount of sharpening changes the numerator. What
+sharpening changes is how convincing the 95.7% looks. That is a legitimate goal for a thumbnail
+or a slide, and a serious problem for evidence, archiving, or anything where someone will later
+ask what was in the original pixels.</p>
+</div>
+
+<h2>Reproducing the phase audit</h2>
+
+<p>Single file, numpy only, about five seconds. It prints the mosaic self-check first — if that
+line is not <code>0.0e+00</code>, the premise is broken and every number below it is meaningless.</p>
+
+<pre><code>import numpy as np
+rng = np.random.default_rng(20261115); N = 1024
+yy, xx = np.mgrid[0:N, 0:N].astype(float)
+FY = np.fft.fftshift(np.fft.fftfreq(N)); RAD = np.hypot(FY[:, None], FY[None, :])
+
+def band(img, lo, hi):                       # one radial band, mean removed
+    F = np.fft.fftshift(np.fft.fft2(img - img.mean()))
+    return np.real(np.fft.ifft2(np.fft.ifftshift(F * ((RAD &gt;= lo) &amp; (RAD &lt; hi)))))
+
+def limit(img, hi=0.45):                     # the premise: no energy above hi
+    F = np.fft.fftshift(np.fft.fft2(img))
+    return np.real(np.fft.ifft2(np.fft.ifftshift(F * (RAD &lt;= hi))))
+
+def psf(img, sigma=0.6):
+    F = np.fft.fftshift(np.fft.fft2(img))
+    return np.real(np.fft.ifft2(np.fft.ifftshift(
+        F * np.exp(-2 * np.pi ** 2 * sigma ** 2 * RAD ** 2))))
+
+base  = 0.35 * (xx / N) + 0.25 * (yy / N)
+base[(xx &gt; 200) &amp; (xx &lt; 430) &amp; (yy &gt; 180) &amp; (yy &lt; 360)] += 0.45
+base += 0.18 * np.sin(2 * np.pi * xx / 5.0) * (yy &lt; 512)
+tex = limit(rng.normal(size=(N, N))); tex /= tex.std()
+GT = limit(base + 0.10 * tex, 0.45); GT -= GT.mean()
+
+BLUR = psf(GT, 0.6)
+PH = [(0, 0), (1, 0), (0, 1), (1, 1)]
+frames = [BLUR[a::2, b::2].copy() for a, b in PH]
+
+mosaic = np.zeros((N, N))                    # all four phases, zero interpolation
+for (a, b), f in zip(PH, frames):
+    mosaic[a::2, b::2] = f
+print("mosaic == blurred truth:", np.abs(mosaic - BLUR).max())   # must be 0.0
+
+def corr(c, lo, hi):
+    a, b = band(c, lo, hi), band(GT, lo, hi)
+    return (a * b).sum() / np.sqrt((a * a).sum() * (b * b).sum())
+
+print(f"1 frame  b3 corr {corr(frames[0].repeat(2, 0).repeat(2, 1), .25, .375):.3f}")
+print(f"4 phases b3 corr {corr(mosaic, .25, .375):.3f}")   # 0.21 vs 0.99
+</code></pre>
+
+<p>The upscale primitive is deliberately absent from that snippet — use whichever resampler you
+are evaluating, since the whole point is that the resampler is not what decides this. For the
+tables above it was a float32 Lanczos3 with PIL's pixel-centre geometry, and the results were
+unchanged by 8-bit quantisation: mapping the scene to 0–255, rounding, and mapping back moved
+the upper-band correlation from 0.209 to 0.208 and left PSNR at 21.77. The effect is 40 dB wide;
+quantisation is not the bottleneck.</p>
+
+<h3 id="self-corrections">Five bugs I hit, and the numbers they produced before I fixed them</h3>
+
+<p>This section exists because every one of these produced a publishable-looking table, and four
+of them pointed at the wrong conclusion.</p>
+
+<ol>
+<li><strong>Fourier-domain convolution with a shifted kernel.</strong> My radial frequency grid is
+built from <code>fftshift(fftfreq)</code>, which is in shifted order, but <code>np.fft.fft2</code>
+returns unshifted output. Multiplying the two directly is a silent no-op on the kernel: the
+convolution of a constant field with the PSF returned <strong>0.0286</strong> instead of 1.0, so
+the Richardson–Lucy update gained a factor of 35 every iteration. Reported PSNR:
+<strong>−2033 dB</strong>, then <code>nan</code>. An assert that <code>conv(ones) == 1</code>
+now runs before the first iteration, and it is what caught the bug that produced
+<strong>−66 dB</strong> in an earlier version of the same function.</li>
+
+<li><strong>Signed data into an algorithm that assumes photons.</strong> Richardson–Lucy is
+derived for non-negative intensities. My scene has negative values, so the ratio
+<code>data / (PSF * estimate)</code> flipped sign wherever the scene went below zero and the
+iteration diverged. Shifting by the minimum before solving and back afterwards fixes it, at zero
+cost, because a constant passes through a unit-sum convolution unchanged.</li>
+
+<li><strong>A scene that was not actually band-limited.</strong> I band-limited the texture but
+not the hard-edged rectangle, which put real energy above 0.5 cycles/pixel into a scene I was
+about to decimate 2×. The result aliased, so "everything above 0.25 was lost" was false before I
+measured anything. Caught by checking that the mosaic matched the blurred truth exactly — it
+differed by 0.58. After band-limiting the whole scene: <code>0.0e+00</code>.</li>
+
+<li><strong>A parity flip disguised as a registration error.</strong> To add ε of misalignment I
+shifted the signal by (nominal phase + ε) and then sampled at the nominal parity. Shifting by a
+whole pixel and then reading the other parity samples a different row — so a 0.01 px error
+produced a residual of 0.58 and reported the technique as collapsing under a hundredth of a
+pixel. The correct model shifts by ε <em>only</em> and samples at the nominal parity. After the
+fix, 0.01 px is invisible and the real tolerance is the 0.1 px shown above — 100× more
+forgiving than the broken version claimed.</li>
+
+<li><strong>PIL's unsharp mask is 8-bit only.</strong> <code>ImageFilter.UnsharpMask</code>
+raises <code>ValueError: image has wrong mode</code> on a float image, and rounding to 8 bits
+first would have destroyed exactly the sub-quantisation differences the experiment measures.
+Replaced with an explicit Gaussian in float via the FFT.</li>
+</ol>
+
+<p>Two of these are worth generalising. The shifted-kernel bug and the parity bug are both cases
+where the code ran, produced plausible numbers, and was wrong by a factor of a hundred or a
+sign. Neither would have been caught by looking at the output; both were caught by asserting a
+property that must hold — convolution of a constant returns the constant, a mosaic of four phases
+reproduces the signal — and checking it before trusting anything downstream. If a measurement
+has a premise, test the premise.</p>
+
 <h2>What this means when you pick a tool</h2>
 
 <p>Given the above, the useful questions are not "how many times upscale" or "which
@@ -312,7 +610,7 @@ That is a real trade and it should be a deliberate one, not a surprise.</p>
 
 <h2>Reproducing this</h2>
 
-<p>Both experiments are ffmpeg + numpy, no proprietary tooling. The shape of the commands:</p>
+<p>Both earlier experiments are ffmpeg + numpy, no proprietary tooling. The shape of the commands:</p>
 
 <pre><code># build the test pattern, shrink 4x, upscale back with each kernel
 ffmpeg -i source.png -vf "scale=100:100:flags=lanczos" low.png
