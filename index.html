@@ -483,8 +483,9 @@ ask what was in the original pixels.</p>
 
 <h2>Reproducing the phase audit</h2>
 
-<p>Single file, numpy only, about five seconds. It prints the mosaic self-check first — if that
-line is not <code>0.0e+00</code>, the premise is broken and every number below it is meaningless.</p>
+<p>Single file, numpy only, about two seconds, no dependencies beyond numpy. It prints the mosaic
+self-check first — if that line is not <code>0.0e+00</code>, the premise is broken and every number
+below it is meaningless. The last two lines are the headline result, and they match the table above.</p>
 
 <pre><code>import numpy as np
 rng = np.random.default_rng(20261115); N = 1024
@@ -504,9 +505,25 @@ def psf(img, sigma=0.6):
     return np.real(np.fft.ifft2(np.fft.ifftshift(
         F * np.exp(-2 * np.pi ** 2 * sigma ** 2 * RAD ** 2))))
 
+def up2(src):                                # 2x lanczos3, PIL pixel centres
+    s = N / src.shape[0]
+    def ax(a, axis):
+        c = (np.arange(N) + 0.5) / s - 0.5
+        b = np.floor(c).astype(int)
+        acc = np.zeros((N, a.shape[1]) if axis == 0 else (a.shape[0], N)); ws = 0
+        for t in np.arange(-2, 4):
+            w = np.sinc(c - b - t) * np.sinc((c - b - t) / 3.0)
+            w[np.abs(c - b - t) &gt;= 3] = 0
+            shp = [1, 1]; shp[axis] = N
+            acc += a.take(np.clip(b + t, 0, a.shape[axis] - 1), axis=axis) * w.reshape(shp)
+            ws = ws + w
+        return acc / (ws[:, None] if axis == 0 else ws[None, :])
+    return ax(ax(np.asarray(src, float), 0), 1)
+
 base  = 0.35 * (xx / N) + 0.25 * (yy / N)
 base[(xx &gt; 200) &amp; (xx &lt; 430) &amp; (yy &gt; 180) &amp; (yy &lt; 360)] += 0.45
 base += 0.18 * np.sin(2 * np.pi * xx / 5.0) * (yy &lt; 512)
+base += 0.18 * np.sin(2 * np.pi * (xx + yy) / 3.4) * (yy &gt;= 512)
 tex = limit(rng.normal(size=(N, N))); tex /= tex.std()
 GT = limit(base + 0.10 * tex, 0.45); GT -= GT.mean()
 
@@ -517,22 +534,23 @@ frames = [BLUR[a::2, b::2].copy() for a, b in PH]
 mosaic = np.zeros((N, N))                    # all four phases, zero interpolation
 for (a, b), f in zip(PH, frames):
     mosaic[a::2, b::2] = f
-print("mosaic == blurred truth:", np.abs(mosaic - BLUR).max())   # must be 0.0
+print("mosaic == blurred truth: %.1e" % np.abs(mosaic - BLUR).max())   # must be 0.0e+00
 
 def corr(c, lo, hi):
     a, b = band(c, lo, hi), band(GT, lo, hi)
     return (a * b).sum() / np.sqrt((a * a).sum() * (b * b).sum())
 
-print(f"1 frame  b3 corr {corr(frames[0].repeat(2, 0).repeat(2, 1), .25, .375):.3f}")
-print(f"4 phases b3 corr {corr(mosaic, .25, .375):.3f}")   # 0.21 vs 0.99
+print("1 frame  b3 corr %.3f" % corr(up2(frames[0]), .25, .375))   # 0.209
+print("4 phases b3 corr %.3f" % corr(mosaic, .25, .375))           # 0.987
 </code></pre>
 
-<p>The upscale primitive is deliberately absent from that snippet — use whichever resampler you
-are evaluating, since the whole point is that the resampler is not what decides this. For the
-tables above it was a float32 Lanczos3 with PIL's pixel-centre geometry, and the results were
-unchanged by 8-bit quantisation: mapping the scene to 0–255, rounding, and mapping back moved
-the upper-band correlation from 0.209 to 0.208 and left PSNR at 21.77. The effect is 40 dB wide;
-quantisation is not the bottleneck.</p>
+<p>Swap <code>up2</code> for whichever resampler you are evaluating — the whole point is that the
+resampler is not what decides this, and the 4-phase row never calls it at all. The implementation
+above is a float64 separable Lanczos3 using PIL's pixel-centre geometry (output pixel <em>i</em>
+sits at <code>(i+0.5)/scale - 0.5</code> in source coordinates, which is the half-pixel offset that
+cost me 46× on an earlier experiment). Results were unchanged by 8-bit quantisation: mapping the
+scene to 0–255, rounding, and mapping back moved the upper-band correlation from 0.209 to 0.208 and
+left PSNR at 21.77. The effect is 40 dB wide; quantisation is not the bottleneck.</p>
 
 <h3 id="self-corrections">Five bugs I hit, and the numbers they produced before I fixed them</h3>
 
