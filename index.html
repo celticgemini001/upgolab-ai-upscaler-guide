@@ -53,6 +53,15 @@ pre code{background:none;padding:0}
 footer{margin-top:4rem;padding-top:1.4rem;border-top:1px solid var(--line);
  font-size:.9rem;color:var(--mut)}
 </style>
+<style>
+.sisternav{margin:2rem 0 0;padding-top:1.2rem;border-top:1px solid #e2e5ea}
+.sisternav p{font-size:.8rem;text-transform:uppercase;letter-spacing:.05em;
+ color:#5b6270;margin:0 0 .6rem}
+.sisternav ul{list-style:none;padding:0;margin:0;display:flex;flex-wrap:wrap;gap:.4rem .9rem}
+.sisternav li{margin:0;font-size:.88rem;line-height:1.4}
+.sisternav a{text-decoration:none;border-bottom:1px solid #d5dae2}
+.sisternav a:hover{border-bottom-color:#0a58ca}
+</style>
 </head>
 <body>
 <main>
@@ -77,7 +86,7 @@ commands at the end of the page.</p>
 
 <ul>
   <li><strong>Interpolation</strong> — invent a value for each new pixel by averaging the
-  ones around it. Bilinear, bicubic, Lanczos, spline. Exactly nothing is recovered,
+  ones around it. Bilinear, bicubic, <a href="https://celticgemini001.github.io/upgolab-gamma-vs-linear-light/">Lanczos</a>, spline. Exactly nothing is recovered,
   because no information outside the source image is used.</li>
   <li><strong>Reconstruction</strong> — a model trained on millions of images predicts what
   detail <em>usually</em> sits in that part of a scene, and paints it in. This is
@@ -97,7 +106,7 @@ frequency in the radial direction), and a fine checkerboard patch. This is the c
 Siemens-star pattern used to test lens and sensor resolution.</p>
 
 <p>Then I shrank it to 100×100 — a 4× reduction, roughly what a 360p clip represents next
-to 4K — and upscaled each version back to 400×400 with six methods, measuring PSNR against
+to 4K — and upscaled each version back to 400×400 with six methods, measuring <a href="https://celticgemini001.github.io/upgolab-sharpen-before-or-after-upscale/">PSNR</a> against
 the ground truth.</p>
 
 <figure>
@@ -476,7 +485,7 @@ ringing pattern is reproducible. Reproducibility is not truth.</p>
 <p><strong>The practical consequence.</strong> An interpolation upscaler cannot add a band it was
 never given — that is information theory, not opinion — and this audit puts a number on it:
 4.27% of the lost band is real, and no amount of sharpening changes the numerator. What
-sharpening changes is how convincing the 95.7% looks. That is a legitimate goal for a thumbnail
+sharpening changes is how convincing the 95.7% looks. That is a legitimate goal for a <a href="https://celticgemini001.github.io/upgolab-thumbnail-4k-master/">thumbnail</a>
 or a slide, and a serious problem for evidence, archiving, or anything where someone will later
 ask what was in the original pixels.</p>
 </div>
@@ -664,16 +673,6 @@ preset. That is the whole finding, compressed.</p>
 Published by <a href="https://upgolab.com">UpgoLAB</a> — AI photo and short-video
 upscaling in the browser. Measurements from ffmpeg 7.x and numpy on a 400×400 ground-truth
 pattern; scripts available on request.
-
-<style>
-.sisternav{margin:2rem 0 0;padding-top:1.2rem;border-top:1px solid #e2e5ea}
-.sisternav p{font-size:.8rem;text-transform:uppercase;letter-spacing:.05em;
- color:#5b6270;margin:0 0 .6rem}
-.sisternav ul{list-style:none;padding:0;margin:0;display:flex;flex-wrap:wrap;gap:.4rem .9rem}
-.sisternav li{margin:0;font-size:.88rem;line-height:1.4}
-.sisternav a{text-decoration:none;border-bottom:1px solid #d5dae2}
-.sisternav a:hover{border-bottom-color:#0a58ca}
-</style>
 
 <nav class="sisternav" aria-label="More measured upscaling guides">
 <p>More measured guides</p>
